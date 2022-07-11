@@ -17,6 +17,8 @@ require(vroom)
 require(dplyr)
 require(plotly)
 require(zoo)
+require(tidyr)
+require(hrbrthemes)
 ```
 
 ```{r TODO}
@@ -69,16 +71,16 @@ Timeseries Plots
 Column {.sidebar}
 -----------------------------------------------------------------------
 
-Choose a sensor to plot. The names are based on the ward and room. For example. J06_A13_03 is ward J6, room 3.
+Choose a sensor to plot.
 
 ```{r}
 selectInput("sensor", label = "Sensor to plot:",
-            choices = unique(df$id), selected = "1152")
+            choices = unique(df$id), selected = "1144")
 ```
 
-Sensors measure every 10s. Down-select the plotting frequency to visualise the data more clearly. This only affects the time-series currently.
+Sensors measure every 15 minutes. Down-select the plotting frequency to visualise the data more clearly. This only affects the time-series currently.
 ```{r}
-sliderInput("frequency", label = "Moving averages smoothing every:",
+sliderInput("frequency", label = "Moving averages smoothing every (1 is no smoothing):",
             min = 0, max = 20, value = 1, step = 1)
 
 # selectInput("sensor", label = "Averaging period:",
@@ -125,7 +127,7 @@ a<-reactive({
 
 ```{r}
 renderValueBox({
-  m <- median(a()$co2_ppm,na.rm = TRUE)#formatC(downloadRate(), digits = 1, format = "f")
+  m <- round(median(a()$co2_ppm,na.rm = TRUE),digits = 1)#formatC(downloadRate(), digits = 1, format = "f")
   valueBox(
     value = m,
     icon = "fa-area-chart",
@@ -152,7 +154,7 @@ renderValueBox({
 
 ```{r}
 renderValueBox({
-  m <- median(a()$temperature_c,na.rm = TRUE)#formatC(downloadRate(), digits = 1, format = "f")
+  m <- round(median(a()$temperature_c,na.rm = TRUE),digits = 1)#formatC(downloadRate(), digits = 1, format = "f")
   valueBox(
     value = m,
     icon = "fa-area-chart",
@@ -271,7 +273,7 @@ renderPlotly({
 <!-- }) -->
 <!-- ``` -->
 
-### **Absolute Humidity** Violin plots
+### **Absolute Humidity** Box plots for each season
 
 ```{r}
 renderPlotly({
@@ -282,9 +284,9 @@ renderPlotly({
     geom_boxplot(aes(y=absolute_humidity,x=season,fill=season))+
     ylab("Absolute humidity [kg/kg]")+
     xlab("Season")+
-    theme(legend.position='none')+
      coord_flip()+
-    hrbrthemes::theme_ipsum()
+    hrbrthemes::theme_ipsum()+
+    theme(legend.position='none')
   )
 
     #Single histogram
@@ -327,12 +329,43 @@ renderPlotly({
 })
 ```
 
+Thresholds
+=====
+
 <!-- Correlations -->
 <!-- ===== -->
 
 
-<!-- row  -->
-<!-- ----- -->
+<!-- # Number of measurements over x ppm -->
+
+```{r}
+# renderPlotly({
+
+  df %>% 
+  group_by(id) %>% 
+   mutate(over_under=case_when(co2<800~"co2 < 800ppm",
+                              co2>=800 & co2< 1250~"co2>800ppm & co2 < 1250ppm",
+                              co2>=1250 ~"co2 > 1250ppm")) %>% 
+  group_by(id,over_under) %>% 
+  tally() %>% 
+  ungroup() %>% 
+  drop_na(over_under) %>% 
+  group_by(id) %>% 
+  mutate(count =sum(n)) %>% 
+  ggplot()+
+  geom_bar(aes(x=id,y=n/count,fill=over_under),stat='identity')+
+  scale_y_continuous(labels = scales::percent_format())+
+  ylab("Percentage")+
+  scale_fill_brewer(palette = "Set2")+
+  labs(fill="Key")+
+  xlab("Sensor ID")+
+  theme_ipsum()+
+  theme(axis.text.x=element_text(angle=90,hjust=1))
+
+
+
+```
+
 
 <!-- ### **Hourly mean temperatures plotted against CO2 **  -->
 <!-- ```{r} -->
