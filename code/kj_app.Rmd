@@ -19,6 +19,7 @@ require(plotly)
 require(zoo)
 require(tidyr)
 require(hrbrthemes)
+hrbrthemes::import_roboto_condensed()
 ```
 
 ```{r TODO}
@@ -31,7 +32,7 @@ require(hrbrthemes)
 
 
 ```{r Import}
-df<-vroom::vroom("../data/data_file.tsv.xz") %>% janitor::clean_names()
+df<-vroom::vroom("data_file.tsv.xz") %>% janitor::clean_names()
 
 df$sensor<-df$id
 df$co2_ppm <- df$co2
