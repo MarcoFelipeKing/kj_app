@@ -1,0 +1,365 @@
+---
+title: "Hospital Air Quality Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+# if (!require("pacman")) install.packages("pacman")
+# pacman::p_load(flexdashboard,shiny,janitor,vroom,dplyr,tidyr,plotly)
+require(flexdashboard)
+require(shiny)
+# require(janitor)
+require(vroom)
+require(dplyr)
+require(plotly)
+require(zoo)
+```
+
+```{r TODO}
+# TODO change colour of valueboxes
+# FIXME Correlation plots need text and alter legend.
+# TODO toggle smoothing with a checkbox
+
+```
+
+
+
+```{r Import}
+df<-vroom::vroom("../data/data_file.tsv.xz") %>% janitor::clean_names()
+
+df$sensor<-df$id
+df$co2_ppm <- df$co2
+df$pm10_ug_m3 <- df$pm10
+df$pm2_5_ug_m3 <- df$pm25
+df$temperature_c <- df$temperature
+df$humidity_percent_rh <- df$humidity
+# SensorPosition<-revalue(ldf.rbind$Sensor, c("A3=J10_South",
+#                                                               "A7=J06_10",
+#                                                               "A8=J06_12",
+#                                                               "A9"="J10_ARCU_SouthEast",
+#                                                               "A10"="J06_06", 
+#                                                               "A13"="J06_04",
+#                                                               "A16"="J06_01",
+#                                                               "A19"="J10_East",
+#                                                               "A23"="J10_4BedBay",
+#                                                               "A27"="J06_12",
+#                                                               "A26"="J06_01",
+#                                                               "A2"="J06_04",
+#                                                               "A25"="J06_06",
+#                                                               "A24"="J06_10",
+#                                                               "A28"="J06_NursesStation",
+#                                                               "A35"="J10_ARCU_SouthEast",
+#                                                               "A36"="J10_ARCU_East",
+#                                                               "A29"="J10_ARCU_South"
+#                                                               ))
+
+# df %>% 
+#   distinct(sensor)->sensors
+
+# sensor_names<-read.csv("../CleanData/sensor_names.csv")
+```
+
+Timeseries Plots
+=====
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+Choose a sensor to plot. The names are based on the ward and room. For example. J06_A13_03 is ward J6, room 3.
+
+```{r}
+selectInput("sensor", label = "Sensor to plot:",
+            choices = unique(df$id), selected = "1152")
+```
+
+Sensors measure every 10s. Down-select the plotting frequency to visualise the data more clearly. This only affects the time-series currently.
+```{r}
+sliderInput("frequency", label = "Moving averages smoothing every:",
+            min = 0, max = 20, value = 1, step = 1)
+
+# selectInput("sensor", label = "Averaging period:",
+#             choices = c("5min", "30min", "Hourly", "Daily"), selected = "30min")
+```
+
+
+<!-- Column {data-width=350} -->
+Row
+-----------------------------------------------------------------------
+
+```{r}
+a<-reactive({
+  
+  # if(input$frequency){}if
+  # 
+  # f<-cbind(input$frequency,c(30,180,360,8640))
+  
+  df %>% 
+    filter(sensor==input$sensor) %>% 
+    # filter(row_number() %% input$frequency == 1) %>% 
+    # filter(pm2_5_ug_m3<100) %>% 
+    # filter(pm10_ug_m3<100) %>% 
+    arrange(timestamp) %>% 
+    mutate(month=lubridate::month(lubridate::ymd_hms(timestamp))) %>% 
+    mutate(day_night=case_when(lubridate::hour(timestamp)>"07:00:00" &lubridate::hour(timestamp)<"19:00:00"~"day",
+                               TRUE ~ "night")) %>%
+    # mutate(month=lubridate::month(timestamp())) %>% 
+    mutate(season = ifelse(month %in% 10:12, "Autumn",
+                               ifelse(month %in% 1:3, "Winter",
+                                      ifelse(month %in% 4:6, "Spring",
+                                             "Summer")))) %>% 
+    mutate(absolute_humidity=(6.112*exp(17.67*temperature_c/(temperature_c+243.5))*humidity_percent_rh*2.1674)/(273.15+temperature_c)) %>% 
+    mutate(yhat_co2_ppm=zoo::rollapply(co2_ppm, input$frequency, mean, fill = NA)) %>% 
+    mutate(yhat_pm2_5_ug_m3=zoo::rollapply(pm2_5_ug_m3, input$frequency, mean, fill = NA)) %>% 
+    mutate(yhat_pm10_ug_m3=zoo::rollapply(pm10_ug_m3, input$frequency, mean, fill = NA))->a
+   
+  a
+})
+
+```
+
+### Median CO2 value within the room {.value-box}
+
+```{r}
+renderValueBox({
+  m <- median(a()$co2_ppm,na.rm = TRUE)#formatC(downloadRate(), digits = 1, format = "f")
+  valueBox(
+    value = m,
+    icon = "fa-area-chart",
+    color = if (m >= 1000) "warning" else "primary"
+  )
+})
+```
+
+### Median PM2.5 value within the room {.value-box}
+
+```{r}
+renderValueBox({
+  m <- median(a()$pm2_5_ug_m3,na.rm = TRUE)#formatC(downloadRate(), digits = 1, format = "f")
+  
+  valueBox(
+    value = m,
+    icon = "fa-area-chart",
+    color = if (m >= 5) "warning" else "primary"
+  )
+})
+```
+
+### Median Temperature C within the room {.value-box}
+
+```{r}
+renderValueBox({
+  m <- median(a()$temperature_c,na.rm = TRUE)#formatC(downloadRate(), digits = 1, format = "f")
+  valueBox(
+    value = m,
+    icon = "fa-area-chart",
+    color = if (m >= 21) "warning" else "primary"
+  )
+})
+```
+
+Row
+-----------------------------------------------------------------------
+### **CO2 Measurements** - Time-series
+
+```{r}
+
+
+renderPlotly({
+plot_ly(a(), type = 'scatter', mode = 'lines')%>%
+    add_trace(x = ~timestamp, y = ~yhat_co2_ppm, name = 'CO2 [ppm]')%>%
+    layout(showlegend = F)%>%
+  layout(title = "",
+         xaxis = list(title = "Date and time" ,
+                      zeroline = FALSE,
+                      rangeslider = list(visible = T),
+                      rangeselector=list(
+                        buttons=list(
+                          list(count=1, label="1m", step="month", stepmode="backward"),
+                          list(count=6, label="6m", step="month", stepmode="backward"),
+                          list(count=1, label="YTD", step="year", stepmode="todate"),
+                          list(count=1, label="1y", step="year", stepmode="backward"),
+                          list(step="all")
+                        ))),
+         
+         yaxis = list(title = "CO2 [ppm]" ,
+                      zeroline = FALSE))
+})
+```
+
+### **Particulate Matter Measurements (PM2.5 and PM10)** - Time-series
+
+```{r}
+
+renderPlotly({
+plot_ly(a(), type = 'scatter', mode = 'lines')%>%
+    add_trace(x = ~timestamp, y = ~yhat_pm2_5_ug_m3, name = 'PM 2.5 [mu g/m^3]')%>%
+    add_trace(x = ~timestamp, y = ~yhat_pm10_ug_m3, name = 'PM 10 [mu g/m^3]')%>%
+    layout(showlegend = F)%>%
+    layout(title = "",
+         xaxis = list(title = "Date and time" ,
+                      zeroline = FALSE,
+                      rangeslider = list(visible = T),
+                      rangeselector=list(
+                        buttons=list(
+                          list(count=1, label="1m", step="month", stepmode="backward"),
+                          list(count=6, label="6m", step="month", stepmode="backward"),
+                          list(count=1, label="YTD", step="year", stepmode="todate"),
+                          list(count=1, label="1y", step="year", stepmode="backward"),
+                          list(step="all")
+                        ))),
+         yaxis = list(title = "PM [mu g/m^3]" ,
+                      zeroline = FALSE))
+})
+```
+
+Row
+-----------------------------------------------------------------------
+
+### **Temperature** Histogram
+
+```{r}
+# https://flaviocopes.com/rgb-color-codes/
+renderPlotly({
+  
+  plot_ly(alpha=0.6,nbinsx = 30) %>% 
+    add_histogram(x = a()$temperature_c, name = 'CO2 [ppm]',
+          histnorm = "probability",marker=list(color = "#1E90FF",line = list(color = "darkgray",
+                                    width = 1))) %>%
+    layout(
+  xaxis=list(title="Temperature [C]"),
+           yaxis=list(title="Probability")
+      )
+  
+  # plot_ly(x = a()$co2_ppm, type = "histogram",
+  #         histnorm = "probability",name = "CO2 [ppm]",
+  #         marker = list(color = "#008ae6",
+  #                       line = list(color = "darkgray",
+  #                                   width = 1)))
+  
+  # xaxis=list(title="Micrograms per meter cubed"),
+  #          yaxis=list(title="Probability"))
+         #  layout(title = "",
+         # xaxis = list(title = "CO2 [ppm]" ,
+         #              zeroline = FALSE
+         #              ),
+         # yaxis = list(title = "Frequency of measurments" ,
+         #              zeroline = FALSE))
+         #  )
+})
+```
+
+<!-- ### Particulate Matter Histogram  -->
+
+<!-- ```{r} -->
+<!-- renderPlotly({ -->
+<!--   plot_ly(alpha=0.6) %>%  -->
+<!--     add_histogram(x = a()$pm2_5_ug_m3, name = 'PM2.5', -->
+<!--           histnorm = "probability")%>%  -->
+<!--     add_histogram(x = a()$pm10_ug_m3, name = 'PM10', showlegend=FALSE, -->
+<!--           histnorm = "probability")%>%  -->
+<!--     layout(barmode = "overlay", -->
+<!--            xaxis=list(title="Micrograms per meter cubed"), -->
+<!--            yaxis=list(title="Probability")) -->
+
+<!--   # , type = "histogram",  marker = list(color = "#008ae6", -->
+<!--   #                           line = list(color = "darkgray", -->
+<!--   #                                       width = 1))) -->
+<!-- }) -->
+<!-- ``` -->
+
+### **Absolute Humidity** Violin plots
+
+```{r}
+renderPlotly({
+  
+  ggplotly(
+   a() %>%
+    ggplot()+
+    geom_boxplot(aes(y=absolute_humidity,x=season,fill=season))+
+    ylab("Absolute humidity [kg/kg]")+
+    xlab("Season")+
+    theme(legend.position='none')+
+     coord_flip()+
+    hrbrthemes::theme_ipsum()
+  )
+
+    #Single histogram
+  # plot_ly(alpha=0.6,nbinsx = 30) %>% 
+  #   add_histogram(x = a()$absolute_humidity, name = 'Absolute Humidity [kg/kg]',text=~a()$humidity_percent_rh,
+  #         histnorm = "probability",
+  #         marker=list(color="#B22222",line = list(color = "darkgray",
+  #                                   width = 1))) %>%
+  #   layout(
+  # xaxis=list(title="Absolute Humidity [kg/kg]"),
+  #          yaxis=list(title="Probability")
+  #     )
+#   fig <- a() %>%
+#   plot_ly(
+#     x = ~absolute_humidity,
+#     y = ~season,
+#     split = ~season,
+#     type = 'violin',
+#     box = list(
+#       visible = T
+#     ),
+#     meanline = list(
+#       visible = T
+#     )
+#   ) 
+# 
+# fig <- fig %>%
+#   layout(
+#     xaxis = list(
+#       title = "Absolute humidity [kg/kg]"
+#     ),
+#     yaxis = list(
+#       title = "Season",
+#       zeroline = F
+#     )
+#   )
+# 
+# fig
+
+})
+```
+
+<!-- Correlations -->
+<!-- ===== -->
+
+
+<!-- row  -->
+<!-- ----- -->
+
+<!-- ### **Hourly mean temperatures plotted against CO2 **  -->
+<!-- ```{r} -->
+<!-- renderPlotly({ -->
+<!--   a() %>% -->
+<!--     mutate(h=lubridate::hour(timestamp)) %>% -->
+<!--     group_by(sensor,season,date,day_night,h) %>% -->
+<!--     summarise(mc=mean(co2_ppm),mt=mean(temperature_c))%>% -->
+<!--     ggplot()+ -->
+<!--     geom_point(aes(x=mt,y=mc,colour=day_night,text =paste("Temp C:", mt,"CO2 [ppm]:", mc)),alpha=0.6)+ -->
+<!--     geom_smooth(aes(x=mt,y=mc,colour=day_night,fill=day_night),alpha=0.2,method="lm")+ -->
+<!--     facet_wrap(~season,nrow = 1)+ -->
+<!--     scale_y_continuous(limits = c(400,2000),trans="log10")+ -->
+<!--     xlab("Temperature [C]")+ -->
+<!--     ylab("CO2 [ppm]")+ -->
+<!--     hrbrthemes::theme_ipsum()->p -->
+
+<!--   ggplotly(p) -->
+<!--     # plot_ly(x=~mt,y=~mc,color=~day_night) -->
+<!--   # filter(sensor %in% c("J10_A29_10BedBay","J10_A35_10BedBay","J10_A36_10BedBay")) %>%  -->
+<!--   # filter(sensor==input$sensor) %>%  -->
+
+
+
+
+
+<!-- }) -->
+
+
+<!-- ``` -->
