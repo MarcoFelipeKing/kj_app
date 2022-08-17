@@ -360,7 +360,7 @@ Thresholds
   scale_fill_brewer(palette = "Set2")+
   labs(fill="Key")+
   xlab("Sensor ID")+
-  theme_ipsum()+
+  # theme_ipsum()+
   theme(axis.text.x=element_text(angle=90,hjust=1))
 
 
